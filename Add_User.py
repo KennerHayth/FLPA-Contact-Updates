@@ -20,8 +20,15 @@ import Shira
 from Shira import Newest_file
 
 Used_emails = pd.read_csv(Shira.Newest_file(r"J:\Admin & Plans Unit\Recovery Systems\2. Reports\4. Data Files\FLPA Contacts"))
+Applicants = pd.read_csv(Shira.Newest_file(r"J:\Admin & Plans Unit\Recovery Systems\2. Reports\4. Data Files\FLPA Applicants Export"))
+Grants = pd.read_csv(Shira.Newest_file(r"J:\Admin & Plans Unit\Recovery Systems\2. Reports\4. Data Files\FLPA Grants"))
+
 
 Used_emails = Used_emails["Contact Email"].str.strip().str.lower().unique()
+Counties = Applicants["County"].str.strip().str.lower().unique()
+Applicant_unqiue = Applicants["Name"].str.strip().str.lower().unique()
+Events = Grants["Grant #"].str.strip().str.lower().unique()
+
 selected_index = [None] 
 user_assignments = {}
 
@@ -298,14 +305,15 @@ def start_tkinter():
 
     APPLICANT_OPTIONS = ["City A", "City B"]
     COUNTY_OPTIONS = ["County X", "County Y", "County Z"]
+    EVENT_OPTIONS = ["4828", "4834", "4734"]
     ACCESS_LEVELS = ["Primary", "Alternate", "Other", "Authorized Agent"]
     ASSIGNMENT_PRESETS = {
         "Full Access Set": [
-            ("City A", "", "Primary"),
-            ("", "County Y", "Alternate")
+            ("City A", "", "4828", "Primary"),
+            ("", "County Y","4834", "Alternate")
         ],
         "Basic Access Set": [
-            ("City B", "", "Other")
+            ("City A", "", "4734", "Authorized Agent")
         ]
     }
 
@@ -316,9 +324,11 @@ def start_tkinter():
             return
 
         def add_assignment():
-            app = applicant_cb.get().strip()
-            county = county_cb.get().strip()
+            app = applicant_var.get().strip()
+            county = county_var.get().strip()
+            event = event_var.get().strip()
             level = access_cb.get().strip()
+
             if (not app and not county) or (app and county):
                 messagebox.showerror("Error", "Please specify either Applicant OR County, not both.")
                 return
@@ -326,7 +336,7 @@ def start_tkinter():
                 messagebox.showerror("Error", "Please select Access Level.")
                 return
 
-            assignment = (app, county, level)
+            assignment = (app, county, event, level)
             if assignment in current_assignments:
                 messagebox.showwarning("Duplicate", "This assignment is already added.")
                 return
@@ -335,11 +345,16 @@ def start_tkinter():
             listbox.insert(tk.END, format_assignment(assignment))
 
         def format_assignment(assignment):
-            app, county, level = assignment
+            app, county, event, level = assignment
+            parts = []
             if app:
-                return f"Applicant: {app} | Access Level: {level}"
-            else:
-                return f"County: {county} | Access Level: {level}"
+                parts.append(f"Applicant: {app}")
+            if county:
+                parts.append(f"County: {county}")
+            if event:
+                parts.append(f"Event: {event}")
+            parts.append(f"Access Level: {level}")
+            return " | ".join(parts)
 
         def apply_preset(preset_name):
             for assignment in ASSIGNMENT_PRESETS[preset_name]:
@@ -355,53 +370,85 @@ def start_tkinter():
             del current_assignments[idx]
             listbox.delete(idx)
 
+            # Immediate update to user_assignments
+            user_key = processing_list.iloc[selected_index[0]]["Email"]
+            user_assignments[user_key] = current_assignments.copy()
+
         def save_assignments():
             user_key = processing_list.iloc[selected_index[0]]["Email"]
             user_assignments[user_key] = current_assignments.copy()
             win.destroy()
 
+        def build_filtered_selector(parent, label_text, options, variable):
+            frame = tk.Frame(parent)
+            tk.Label(frame, text=label_text).pack(anchor="w")
+
+            filter_entry = tk.Entry(frame)
+            filter_entry.pack(fill="x")
+
+            listbox = tk.Listbox(frame, height=5, exportselection=0)  # <- Important!
+            listbox.pack(fill="both", expand=True)
+
+            def update_list(*args):
+                search = filter_entry.get().lower()
+                listbox.delete(0, tk.END)
+                for option in options:
+                    if search in option.lower():
+                        listbox.insert(tk.END, option)
+
+            def on_select(event):
+                selection = listbox.curselection()
+                if selection:
+                    index = selection[0]
+                    selected_value = listbox.get(index)
+
+                    # Toggle behavior
+                    if variable.get() == selected_value:
+                        listbox.selection_clear(index)
+                        variable.set("")
+                    else:
+                        variable.set(selected_value)
+
+            filter_entry.bind('<KeyRelease>', update_list)
+            listbox.bind('<<ListboxSelect>>', on_select)
+            update_list()
+
+            return frame
+
         win = tk.Toplevel()
         win.title("Edit Assignments")
-        win.geometry("450x450")
-        tk.Label(win, text="Applicant").pack()
-        applicant_cb = ttk.Combobox(win, values=APPLICANT_OPTIONS)
-        applicant_cb.pack()
-        applicant_cb.set("")
-        tk.Label(win, text="County").pack()
-        county_cb = ttk.Combobox(win, values=COUNTY_OPTIONS)
-        county_cb.pack()
-        county_cb.set("")
+        win.geometry("500x750")
 
+        applicant_var = tk.StringVar()
+        county_var = tk.StringVar()
+        event_var = tk.StringVar()
 
-        def filter_applicant(event):
-            typed = applicant_cb.get()
-            filtered = [x for x in APPLICANT_OPTIONS if typed.lower() in x.lower()]
-            applicant_cb['values'] = filtered
+        # Applicant selector
+        app_frame = build_filtered_selector(win, "Applicant", APPLICANT_OPTIONS, applicant_var)
+        app_frame.pack(padx=5, pady=5, fill="both", expand=False)
 
-        applicant_cb.bind('<KeyRelease>', filter_applicant)
-        def filter_county(event):
-            typed = county_cb.get()
-            filtered = [x for x in COUNTY_OPTIONS if typed.lower() in x.lower()]
-            county_cb['values'] = filtered
-        county_cb.bind('<KeyRelease>', filter_county)
+        # County selector
+        county_frame = build_filtered_selector(win, "County", COUNTY_OPTIONS, county_var)
+        county_frame.pack(padx=5, pady=5, fill="both", expand=False)
 
-        user_key = processing_list.iloc[selected_index[0]]["Email"]
-        current_assignments = user_assignments.get(user_key, [])[:]
+        # Event selector
+        event_frame = build_filtered_selector(win, "Event", EVENT_OPTIONS, event_var)
+        event_frame.pack(padx=5, pady=5, fill="both", expand=False)
 
-
-
-
+        # Access level dropdown
         tk.Label(win, text="Access Level").pack()
         access_cb = ttk.Combobox(win, values=ACCESS_LEVELS)
-        access_cb.pack()
+        access_cb.pack(padx=5, pady=(0, 5))
         access_cb.set("")
 
+        # Add button
         add_btn = tk.Button(win, text="Add Assignment", command=add_assignment)
         add_btn.pack(pady=5)
 
+        # Presets
         tk.Label(win, text="Presets").pack()
         preset_listbox = tk.Listbox(win, height=5)
-        preset_listbox.pack()
+        preset_listbox.pack(padx=5, fill="x")
         for preset in ASSIGNMENT_PRESETS:
             preset_listbox.insert(tk.END, preset)
 
@@ -414,16 +461,24 @@ def start_tkinter():
 
         preset_listbox.bind('<<ListboxSelect>>', on_preset_select)
 
+        # Action buttons in a single row
+        action_frame = tk.Frame(win)
+        action_frame.pack(pady=5, fill="x")
+
+        remove_btn = tk.Button(action_frame, text="Remove Selected Assignment", command=remove_assignment)
+        remove_btn.pack(side="left", padx=10)
+
+        save_btn = tk.Button(action_frame, text="Save Assignments", command=save_assignments)
+        save_btn.pack(side="right", padx=10)
+
+        # Assignments list at the bottom
         listbox = tk.Listbox(win, width=60, height=10)
-        listbox.pack(pady=5)
+        listbox.pack(pady=5, padx=5, fill="both", expand=True)
+
+        user_key = processing_list.iloc[selected_index[0]]["Email"]
+        current_assignments = user_assignments.get(user_key, [])[:]
         for assignment in current_assignments:
             listbox.insert(tk.END, format_assignment(assignment))
-
-        remove_btn = tk.Button(win, text="Remove Selected Assignment", command=remove_assignment)
-        remove_btn.pack(pady=5)
-
-        save_btn = tk.Button(win, text="Save Assignments", command=save_assignments)
-        save_btn.pack(pady=10)
 
 
     append_btn = tk.Button(root, text="Add to List", command=append_user, bg="blue", fg="white")
